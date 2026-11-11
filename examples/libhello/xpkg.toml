@@ -1,0 +1,40 @@
+# Package description consumed by `xarch-pkg build examples/libhello`.
+
+[package]
+name = "libhello1"
+version = "1.0.0-1"
+maintainer = "Shammy Kumar <shammykumarsbu27@gmail.com>"
+description = "example greeting shared library"
+long_description = """
+libhello is a tiny C shared library used to demonstrate building the
+same source into Debian packages for amd64, arm64, armhf and riscv64
+with xarch-pkg.
+"""
+section = "libs"
+priority = "optional"
+homepage = "https://github.com/shammykr/cross-arch-pkg-builder"
+depends = ["libc6 (>= 2.34)"]
+
+[maintainer_scripts]
+postinst = "debian/postinst"
+postrm = "debian/postrm"
+
+[build]
+# Runs inside the target chroot with DESTDIR, CFLAGS, LDFLAGS and
+# SOURCE_DATE_EPOCH already exported by xarch-pkg.
+command = "make && make install PREFIX=/usr"
+
+[environment]
+suite = "trixie"
+# A snapshot.debian.org timestamp freezes the whole archive, so the pinned
+# versions below stay installable and every chroot is identical over time.
+mirror = "http://snapshot.debian.org/archive/debian/20261101T000000Z"
+source_date_epoch = 1761955200  # 2025-11-01T00:00:00Z
+
+# Exact versions installed in every chroot and verified after install.
+[toolchain]
+gcc = "4:14.2.0-1"
+gcc-14 = "14.2.0-19"
+binutils = "2.44-3"
+libc6-dev = "2.41-12+deb13u4"
+make = "4.4.1-2"
