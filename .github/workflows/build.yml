@@ -1,0 +1,75 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  deb:
+    name: libhello1 / ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, armhf, riscv64]
+    # amd64 and arm64 must pass; the 32-bit ARM and RISC-V jobs are allowed to
+    # fail because they depend on QEMU user-mode support on the hosted runner.
+    continue-on-error: ${{ matrix.arch == 'armhf' || matrix.arch == 'riscv64' }}
+    env:
+      ROOTFS: ${{ github.workspace }}/.rootfs-cache/rootfs-${{ matrix.arch }}.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host tools (QEMU, debootstrap, dpkg, gnupg)
+        run: sudo ./scripts/setup-host.sh
+
+      - name: Install xarch-pkg
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install .
+          .venv/bin/xarch-pkg --version
+
+      - name: Register QEMU binfmt_misc handler
+        run: sudo .venv/bin/xarch-pkg setup-qemu --arch ${{ matrix.arch }}
+
+      # The provisioned chroot only depends on the arch and the [environment] /
+      # [toolchain] sections, so cache it as a pre-built rootfs tarball.
+      - name: Restore pre-built rootfs
+        id: rootfs
+        uses: actions/cache@v4
+        with:
+          path: .rootfs-cache
+          key: rootfs-v1-${{ matrix.arch }}-${{ hashFiles('examples/libhello/xpkg.toml', 'src/xarch_pkg/chroot.py') }}
+
+      - name: Create chroot with debootstrap and export rootfs
+        if: steps.rootfs.outputs.cache-hit != 'true'
+        run: sudo .venv/bin/xarch-pkg chroot examples/libhello --arch ${{ matrix.arch }} --export "$ROOTFS"
+
+      - name: Build, validate, repro-check and sign
+        run: |
+          sudo .venv/bin/xarch-pkg build examples/libhello \
+            --arch ${{ matrix.arch }} \
+            --rootfs-tarball "$ROOTFS" \
+            --repro-check --sign
+
+      - name: Inspect package
+        run: |
+          deb=dist/libhello1_1.0.0-1_${{ matrix.arch }}.deb
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          gpg --import dist/signing-key.asc
+          gpg --verify "$deb.asc" "$deb"
+          gpg --verify dist/libhello1_1.0.0-1_${{ matrix.arch }}.changes
+          sha256sum dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libhello1-${{ matrix.arch }}
+          path: dist/
