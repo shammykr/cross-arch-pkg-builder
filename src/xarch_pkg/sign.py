@@ -13,9 +13,9 @@ releases point --gnupg-home at a keyring holding your own key.
 
 from __future__ import annotations
 
-import email.utils
 import hashlib
 import os
+import time
 from pathlib import Path
 
 from xarch_pkg.config import PackageConfig
@@ -90,7 +90,7 @@ def write_changes(cfg: PackageConfig, deb: Path, arch: str) -> Path:
     data = deb.read_bytes()
     size = len(data)
     md5, sha1, sha256 = (hashlib.new(h, data).hexdigest() for h in ("md5", "sha1", "sha256"))
-    date = email.utils.formatdate(cfg.source_date_epoch, usegmt=False, localtime=False)
+    date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(cfg.source_date_epoch))
     version = cfg.version.split(":", 1)[-1]
     changes = (
         "Format: 1.8\n"
