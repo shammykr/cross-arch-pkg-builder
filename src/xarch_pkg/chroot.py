@@ -23,7 +23,8 @@ from xarch_pkg import qemu
 from xarch_pkg.config import PackageConfig
 from xarch_pkg.util import BuildError, log, run
 
-READY_MARKER = ".xarch-pkg-ready"
+BASE_MARKER = ".xarch-pkg-base"  # debootstrap (both stages) finished
+READY_MARKER = ".xarch-pkg-ready"  # toolchain provisioned; holds a spec hash
 LOCK_FILE = "etc/xarch-pkg/toolchain.lock"
 DEBIAN_KEYRING = Path("/usr/share/keyrings/debian-archive-keyring.gpg")
 BASE_PACKAGES = ["ca-certificates"]
@@ -39,12 +40,19 @@ class Chroot:
 
     # ---------------------------------------------------------------- creation
     def exists(self) -> bool:
-        return (self.root / "usr/bin/apt-get").exists()
+        return (self.root / BASE_MARKER).exists()
+
+    def _reset(self) -> None:
+        """Remove a half-created chroot left behind by an interrupted run."""
+        if self.root.exists():
+            log(f"removing incomplete chroot {self.root}")
+            run(["rm", "-rf", "--one-file-system", str(self.root)])
+        self.root.mkdir(parents=True)
 
     def debootstrap(self, mirror: str, reg: qemu.Registration | None) -> None:
         if not shutil.which("debootstrap"):
             raise BuildError("debootstrap is not installed (see scripts/setup-host.sh)")
-        self.root.mkdir(parents=True, exist_ok=True)
+        self._reset()
         cmd = ["debootstrap", f"--arch={self.target.name}", "--variant=minbase"]
         if DEBIAN_KEYRING.exists():
             cmd.append(f"--keyring={DEBIAN_KEYRING}")
@@ -70,10 +78,11 @@ class Chroot:
             'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n'
             'Dpkg::Use-Pty "0";\n'
         )
+        (self.root / BASE_MARKER).write_text(f"{self.suite} {self.target.name} {mirror}\n")
 
     def import_tarball(self, source: str) -> None:
         """Seed the chroot from a rootfs tarball (local path or http(s) URL)."""
-        self.root.mkdir(parents=True, exist_ok=True)
+        self._reset()
         with contextlib.ExitStack() as stack:
             path = Path(source)
             if source.startswith(("http://", "https://")):
@@ -86,6 +95,8 @@ class Chroot:
                 raise BuildError(f"rootfs tarball {source} not found")
             log(f"extracting rootfs {path} -> {self.root}")
             run(["tar", "--numeric-owner", "-xpf", str(path), "-C", str(self.root)])
+        if not self.exists():
+            raise BuildError(f"{source} is not a rootfs exported by `xarch-pkg chroot --export`")
 
     def export_tarball(self, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
